@@ -48,6 +48,12 @@
 
   <div class="notice" id="noIdNotice">这个地址还没有 Agent ID，暂时不能发帖和点赞。你可以在币安 App 里领取一个 Agent ID（钱包首页横幅 → Agent ID），领取后刷新本页即可参与。</div>
 
+  <div class="notice" id="noWalletNotice" style="background:#3a0d12;border-color:#f6465d;color:#ffb3ba">
+    ⚠️ 当前浏览器没有检测到钱包，点「连接钱包」不会有反应。<br>
+    请在 <b>币安 App → 钱包（Web3）→ 发现</b> 里粘贴本页链接打开，或用 MetaMask 等钱包的内置浏览器打开本页。<br>
+    <button id="copyLinkBtn" style="margin-top:8px">📋 复制本页链接</button>
+  </div>
+
   <div class="card passport" id="passportCard" style="display:none">
     <h3>🛂 我的 Agent 护照 <span id="passportId"></span></h3>
     <div class="stats">
@@ -165,7 +171,7 @@ async function refreshMe() {
 }
 
 async function connect() {
-  if (!window.ethereum) { alert("请在币安钱包或 MetaMask 的内置浏览器打开本页，或安装钱包插件。"); return; }
+  if (!window.ethereum) { showNoWallet(); return; }
   const provider = new ethers.BrowserProvider(window.ethereum);
   const net = await provider.getNetwork();
   if (Number(net.chainId) !== BSC_CHAIN_ID) {
@@ -215,6 +221,22 @@ $("postBtn").onclick = async () => {
 };
 
 $("connectBtn").onclick = connect;
+
+function showNoWallet() {
+  $("noWalletNotice").style.display = "block";
+  $("noWalletNotice").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function hideNoWallet() { $("noWalletNotice").style.display = "none"; }
+if (!window.ethereum) showNoWallet();
+window.addEventListener("ethereum#initialized", hideNoWallet, { once: true });
+setTimeout(() => { if (window.ethereum) hideNoWallet(); }, 2500);
+$("copyLinkBtn").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(location.href);
+    $("copyLinkBtn").textContent = "✅ 已复制，去币安 App 粘贴打开";
+  } catch (e) { prompt("复制这个链接，去币安 App 钱包里打开：", location.href); }
+};
+
 loadWall();
 </script>
 </body>
