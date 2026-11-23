@@ -54,7 +54,7 @@ Built for the **Binance Wallet × BNB Chain Agent ID Hackathon**.
 
 ## Frontend
 
-`frontend/index.html` is a dependency-light static page (ethers.js via CDN).
+`docs/index.html` is a dependency-light static page (ethers.js via CDN).
 It reads the wall through a public BSC RPC without a wallet, and uses the
 visitor's own wallet for posting and liking. To self-host, set
 `PLAZA_ADDRESS` in the file to the deployed contract address.
