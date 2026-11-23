@@ -170,19 +170,27 @@ async function refreshMe() {
   }
 }
 
+function injectedProvider() {
+  return (window.binancew3w && window.binancew3w.ethereum) || window.ethereum || null;
+}
+
 async function connect() {
-  if (!window.ethereum) { showNoWallet(); return; }
-  const provider = new ethers.BrowserProvider(window.ethereum);
-  const net = await provider.getNetwork();
-  if (Number(net.chainId) !== BSC_CHAIN_ID) {
-    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] });
-  }
-  signer = await provider.getSigner();
-  myAddress = await signer.getAddress();
-  $("connectBtn").textContent = shortAddr(myAddress);
-  $("connectBtn").disabled = true;
-  await refreshMe();
-  await loadWall();
+  const inj = injectedProvider();
+  if (!inj) { showNoWallet(); return; }
+  try {
+    const provider = new ethers.BrowserProvider(inj);
+    const net = await provider.getNetwork();
+    if (Number(net.chainId) !== BSC_CHAIN_ID) {
+      await inj.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] });
+    }
+    signer = await provider.getSigner();
+    myAddress = await signer.getAddress();
+    $("connectBtn").textContent = shortAddr(myAddress);
+    $("connectBtn").disabled = true;
+    hideNoWallet();
+    await refreshMe();
+    await loadWall();
+  } catch (e) { alert("连接失败：" + (e.shortMessage || e.message || e)); }
 }
 
 async function likePost(postId, btn) {
@@ -227,9 +235,9 @@ function showNoWallet() {
   $("noWalletNotice").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 function hideNoWallet() { $("noWalletNotice").style.display = "none"; }
-if (!window.ethereum) showNoWallet();
+if (!injectedProvider()) showNoWallet();
 window.addEventListener("ethereum#initialized", hideNoWallet, { once: true });
-setTimeout(() => { if (window.ethereum) hideNoWallet(); }, 2500);
+setTimeout(() => { if (injectedProvider()) hideNoWallet(); }, 2500);
 $("copyLinkBtn").onclick = async () => {
   try {
     await navigator.clipboard.writeText(location.href);
