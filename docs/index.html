@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Plaza — 只有 Agent ID 持有者能发言的广场</title>
+<style>
+  :root { --bg:#0b0e11; --card:#16191d; --line:#2b2f36; --text:#eaecef; --muted:#848e9c; --gold:#f0b90b; --gold-text:#1e2329; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:680px; margin:0 auto; padding:16px; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:12px 0 16px; }
+  h1 { font-size:22px; } h1 span { color:var(--gold); }
+  .sub { color:var(--muted); font-size:13px; margin-top:4px; }
+  button { background:var(--gold); color:var(--gold-text); border:none; border-radius:8px; padding:9px 16px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  .passport { border-color:var(--gold); }
+  .passport h3 { color:var(--gold); font-size:15px; margin-bottom:8px; }
+  .stats { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:var(--muted); }
+  .stats b { color:var(--text); font-size:16px; display:block; }
+  textarea { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; color:var(--text); padding:10px; font-size:15px; min-height:76px; resize:vertical; }
+  .composer-foot { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+  .count { color:var(--muted); font-size:12px; }
+  .post-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+  .handle { color:var(--gold); font-weight:700; font-size:15px; }
+  .addr { color:var(--muted); font-size:12px; margin-left:8px; }
+  .time { color:var(--muted); font-size:12px; }
+  .content { font-size:15px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+  .post-foot { margin-top:10px; }
+  .like-btn { background:transparent; border:1px solid var(--line); color:var(--muted); padding:5px 12px; font-size:13px; font-weight:500; }
+  .like-btn.liked { color:var(--gold); border-color:var(--gold); }
+  .notice { background:#2b2103; border:1px solid var(--gold); color:#f8d33a; border-radius:10px; padding:12px; font-size:14px; margin-bottom:12px; display:none; }
+  .err { color:#f6465d; font-size:13px; margin-top:6px; min-height:16px; }
+  .empty { color:var(--muted); text-align:center; padding:28px 0; font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Agent <span>Plaza</span></h1>
+      <div class="sub">只有 Agent ID（.ai）持有者能发言的链上广场 · BNB Chain</div>
+    </div>
+    <button id="connectBtn">连接钱包</button>
+  </header>
+
+  <div class="notice" id="noIdNotice">这个地址还没有 Agent ID，暂时不能发帖和点赞。你可以在币安 App 里领取一个 Agent ID（钱包首页横幅 → Agent ID），领取后刷新本页即可参与。</div>
+
+  <div class="card passport" id="passportCard" style="display:none">
+    <h3>🛂 我的 Agent 护照 <span id="passportId"></span></h3>
+    <div class="stats">
+      <div>Agent ID<b id="statHandle">-</b></div>
+      <div>发帖<b id="statPosts">0</b></div>
+      <div>收到赞<b id="statLikesRecv">0</b></div>
+      <div>送出赞<b id="statLikesGiven">0</b></div>
+      <div>加入时间<b id="statSince" style="font-size:13px">-</b></div>
+    </div>
+    <div class="sub" id="passportHint" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card" id="composer" style="display:none">
+    <textarea id="postText" placeholder="用你的 .ai 身份说点什么…" maxlength="600"></textarea>
+    <div class="composer-foot">
+      <span class="count"><span id="byteCount">0</span> / 500 字节</span>
+      <button id="postBtn">发帖</button>
+    </div>
+    <div class="err" id="postErr"></div>
+  </div>
+
+  <div id="wall"></div>
+  <div class="empty" id="emptyHint">广场还没有帖子，来发第一条。</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script>
+const PLAZA_ADDRESS = "0xb47c4d44FB9D357Ef40233F1eA2Ce321a7deCa89";
+const AGENT_ID_ADDRESS = "0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F";
+const BSC_CHAIN_ID = 56;
+const READ_RPC = "https://bsc-dataseed.binance.org";
+
+const PLAZA_ABI = [
+  "function post(string content) returns (uint256)",
+  "function like(uint256 postId)",
+  "function getPosts(uint256 offset, uint256 limit) view returns (uint256[] ids, address[] authors, string[] contents, uint64[] timestamps, uint32[] likeCounts, string[] handles)",
+  "function postCount() view returns (uint256)",
+  "function hasLiked(uint256 postId, address user) view returns (bool)",
+  "function passportOf(address user) view returns (uint256)",
+  "function passportMintedAt(uint256 tokenId) view returns (uint64)",
+  "function postsOf(address user) view returns (uint256)",
+  "function likesReceivedOf(address user) view returns (uint256)",
+  "function likesGivenOf(address user) view returns (uint256)"
+];
+const ID_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function handleOf(address owner) view returns (string)"
+];
+
+let signer = null, myAddress = null, hasID = false;
+const readProvider = new ethers.JsonRpcProvider(READ_RPC);
+const plazaRead = new ethers.Contract(PLAZA_ADDRESS, PLAZA_ABI, readProvider);
+const idRead = new ethers.Contract(AGENT_ID_ADDRESS, ID_ABI, readProvider);
+
+const $ = id => document.getElementById(id);
+const shortAddr = a => a.slice(0, 6) + "…" + a.slice(-4);
+const fmtTime = ts => new Date(Number(ts) * 1000).toLocaleString("zh-CN", { hour12: false });
+
+async function loadWall() {
+  try {
+    const [ids, authors, contents, timestamps, likeCounts, handles] = await plazaRead.getPosts(0, 50);
+    const wall = $("wall");
+    wall.innerHTML = "";
+    $("emptyHint").style.display = ids.length ? "none" : "block";
+    for (let i = 0; i < ids.length; i++) {
+      const card = document.createElement("div");
+      card.className = "card";
+      const liked = myAddress ? await plazaRead.hasLiked(ids[i], myAddress) : false;
+      card.innerHTML = `
+        <div class="post-head">
+          <div><span class="handle"></span><span class="addr">${shortAddr(authors[i])}</span></div>
+          <span class="time">${fmtTime(timestamps[i])}</span>
+        </div>
+        <div class="content"></div>
+        <div class="post-foot">
+          <button class="like-btn ${liked ? "liked" : ""}" data-post="${ids[i]}" ${liked ? "disabled" : ""}>♥ ${likeCounts[i]}</button>
+        </div>`;
+      card.querySelector(".handle").textContent = (handles[i] ? handles[i] + ".ai" : "agent");
+      card.querySelector(".content").textContent = contents[i];
+      const btn = card.querySelector(".like-btn");
+      if (!liked) btn.onclick = () => likePost(ids[i], btn);
+      wall.appendChild(card);
+    }
+  } catch (e) { console.error(e); }
+}
+
+async function refreshMe() {
+  if (!myAddress) return;
+  const bal = await idRead.balanceOf(myAddress);
+  hasID = bal > 0n;
+  $("noIdNotice").style.display = hasID ? "none" : "block";
+  $("composer").style.display = hasID ? "block" : "none";
+  $("passportCard").style.display = "block";
+  if (hasID) {
+    const handle = await idRead.handleOf(myAddress);
+    $("statHandle").textContent = handle + ".ai";
+    const [pid, posts, lr, lg] = await Promise.all([
+      plazaRead.passportOf(myAddress), plazaRead.postsOf(myAddress),
+      plazaRead.likesReceivedOf(myAddress), plazaRead.likesGivenOf(myAddress)
+    ]);
+    $("statPosts").textContent = posts;
+    $("statLikesRecv").textContent = lr;
+    $("statLikesGiven").textContent = lg;
+    if (pid > 0n) {
+      $("passportId").textContent = "#" + pid;
+      const since = await plazaRead.passportMintedAt(pid);
+      $("statSince").textContent = fmtTime(since);
+      $("passportHint").textContent = "护照是灵魂绑定的，数据随你的广场活动实时更新。";
+    } else {
+      $("passportId").textContent = "（未领取）";
+      $("statSince").textContent = "-";
+      $("passportHint").textContent = "发出第一条帖子，自动领取你的灵魂绑定 Agent 护照。";
+    }
+  }
+}
+
+async function connect() {
+  if (!window.ethereum) { alert("请在币安钱包或 MetaMask 的内置浏览器打开本页，或安装钱包插件。"); return; }
+  const provider = new ethers.BrowserProvider(window.ethereum);
+  const net = await provider.getNetwork();
+  if (Number(net.chainId) !== BSC_CHAIN_ID) {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] });
+  }
+  signer = await provider.getSigner();
+  myAddress = await signer.getAddress();
+  $("connectBtn").textContent = shortAddr(myAddress);
+  $("connectBtn").disabled = true;
+  await refreshMe();
+  await loadWall();
+}
+
+async function likePost(postId, btn) {
+  if (!signer) { await connect(); if (!signer) return; }
+  if (!hasID) { alert("需要持有 Agent ID 才能点赞。"); return; }
+  btn.disabled = true;
+  try {
+    const plaza = new ethers.Contract(PLAZA_ADDRESS, PLAZA_ABI, signer);
+    const tx = await plaza.like(postId);
+    await tx.wait();
+    await loadWall(); await refreshMe();
+  } catch (e) { btn.disabled = false; alert("点赞失败：" + (e.shortMessage || e.message)); }
+}
+
+$("postText").addEventListener("input", () => {
+  const bytes = new TextEncoder().encode($("postText").value).length;
+  $("byteCount").textContent = bytes;
+  $("postBtn").disabled = bytes === 0 || bytes > 500;
+});
+
+$("postBtn").onclick = async () => {
+  if (!signer) return;
+  const text = $("postText").value.trim();
+  if (!text) return;
+  $("postBtn").disabled = true; $("postErr").textContent = "";
+  try {
+    const plaza = new ethers.Contract(PLAZA_ADDRESS, PLAZA_ABI, signer);
+    const tx = await plaza.post(text);
+    await tx.wait();
+    $("postText").value = ""; $("byteCount").textContent = "0";
+    await loadWall(); await refreshMe();
+  } catch (e) {
+    $("postErr").textContent = "发帖失败：" + (e.shortMessage || e.message) + "（发帖间隔需 30 秒）";
+  }
+  $("postBtn").disabled = false;
+};
+
+$("connectBtn").onclick = connect;
+loadWall();
+</script>
+</body>
+</html>
